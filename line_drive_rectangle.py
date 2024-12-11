@@ -69,3 +69,5 @@ while (cv2.waitKey(1) != 27):
     cv2.imshow('line_rec', allBinary)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         time.sleep(20)
+
+print("ajdlasjdlkmas")
