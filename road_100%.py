@@ -1,189 +1,145 @@
 import cv2
+import torch
+#import tracker
 import numpy as np
+import math
+from tkinter import*
+from tkinter.ttk import *
 import time
-#import serial
+import math
+
+
+class Tracker:
+    def __init__(self):
+        # Store the center positions of the objects
+        self.center_points = {}
+        # Keep the count of the IDs
+        # each time a new object id detected, the count will increase by one
+        self.id_count = 0
+
+
+    def update(self, objects_rect):
+        # Objects boxes and ids
+        objects_bbs_ids = []
+
+        # Get center point of new object
+        for rect in objects_rect:
+            x, y, w, h = rect
+            cx = (x + x + w) // 2
+            cy = (y + y + h) // 2
+
+            # Find out if that object was detected already
+            same_object_detected = False
+            for id, pt in self.center_points.items():
+                dist = math.hypot(cx - pt[0], cy - pt[1])
+
+                if dist < 35:
+                    self.center_points[id] = (cx, cy)
+#                    print(self.center_points)
+                    objects_bbs_ids.append([x, y, w, h, id])
+                    same_object_detected = True
+                    break
+
+            # New object is detected we assign the ID to that object
+            if same_object_detected is False:
+                self.center_points[self.id_count] = (cx, cy)
+                objects_bbs_ids.append([x, y, w, h, self.id_count])
+                self.id_count += 1
+
+        # Clean the dictionary by center points to remove IDS not used anymore
+        new_center_points = {}
+        for obj_bb_id in objects_bbs_ids:
+            _, _, _, _, object_id = obj_bb_id
+            center = self.center_points[object_id]
+            new_center_points[object_id] = center
+
+        # Update dictionary with IDs not used removed
+        self.center_points = new_center_points.copy()
+        return objects_bbs_ids
 
 
 
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 cap = cv2.VideoCapture(0)
 
-img_size = [200, 360]
 
-src = np.float32([[50, 200],
-                  [280, 200],
-                  [260, 120],
-                  [100, 120]])
+def POINTS(event, x, y, flags, param):
+    if event == cv2.EVENT_MOUSEMOVE:
 
-dct = np.float32([[0, img_size[0]],
-                  [img_size[1], img_size[0]],
-                  [img_size[1], 0],
-                  [0, 0]])
+        colorsBGR = [x, y]
+        print(colorsBGR)
 
-src_draw = np.array(src, dtype=np.int32)
 
-cn = 0
+cv2.namedWindow('FRAME')
+cv2.setMouseCallback('FRAME', POINTS)
 
-#ser = serial.Serial('/COM8', 9600, timeout=1.0)
-#time.sleep(2)
-#ser.reset_input_buffer()
-#print('serial ok')
+tracker = Tracker()
+window = Tk()
 
-while (cv2.waitKey(1) != 27):
+window.title('GFG')
+
+
+weight, height = 1020, 800
+
+k_cirle = 250
+k_rec = 50
+
+canvas = Canvas(window, width=weight, height=height)
+canvas.pack()
+while True:
+    time.sleep(0.1)
     ret, frame = cap.read()
-    if ret == False:
-        print('End video')
+    frame = cv2.resize(frame, (weight, height))
+    result = model(frame)
+    canvas.delete('all')
+
+    detect_rec = canvas.create_rectangle(650, 70, 980, 130, fill='red', bg=None, width=2)
+    detect_text = canvas.create_text(800, 100, text='БРАТЬ НЕЛЬЗЯ', fill='white', font=('Purisa', 20))
+
+
+    canvas.create_oval(weight//2-k_cirle, height-k_cirle, weight//2+k_cirle, height+k_cirle, fill='green')
+    canvas.create_rectangle(weight//2-k_rec, height-k_rec, weight//2+k_rec, height, fill='red')
+
+    parametrs = []
+    parametrs_xy = []
+    cn = 1000
+    for  index, row in result.pandas().xyxy[0].iterrows():
+        if row['name'] in ['vase', 'bottle']:
+            k = ((row['xmin']-weight//2)**2+(np.mean(row['ymax']-row['ymin'])- height-k_rec)**2)**0.5
+            if k<cn:
+                cn = k
+                parametrs_xy = [row['xmin'], row['ymin'], row['xmax'], row['ymax']]
+                parametrs = [weight//2, height-k_rec, (row['xmax']+ row['xmin'])//2, (row['ymax'] + row['ymin'])//2]
+                print(parametrs)
+
+
+            print(index)
+            print()
+
+
+            print(row)
+            canvas.create_rectangle(row['xmin'], row['ymin'], row['xmax'], row['ymax'])
+    if len(parametrs) > 0:
+
+        canvas.create_line(parametrs[0], parametrs[1], parametrs[2], parametrs[3], fill='blue', width=1)
+        if ((parametrs[2]-weight//2)**2+(parametrs[3]-height)**2)**0.5<k_cirle:
+            canvas.create_text(800, 200, text=f'манип. {str(math.degrees(math.asin((parametrs[2]-parametrs[0])/((parametrs[2]-parametrs[0])**2+(height-parametrs[3])**2)**0.5)))}', fill='black',  font=('Purisa', 15))
+            canvas.itemconfig(detect_rec, fill='green')
+        a = math.degrees(math.asin((height-parametrs[3])/((parametrs[0]-parametrs[2])**2+(height-parametrs[3])**2)**0.5))-90
+        if parametrs[2] <= parametrs[0]:
+            a = abs(a)
+
+        canvas.create_text(800, 300, text=f'{a}', font=('Purisa', 15))
+
+    frame = np.squeeze(result.render())
+    cv2.imshow('FRAME', frame)
+
+    window.update()
+
+    if cv2.waitKey(1) & 0xFF == 27:
         break
 
-    cn1 = 0
-    time.sleep(0.1)
-    rezized = cv2.resize(frame, (img_size[1], img_size[0]))
-    cv2.imshow('222', rezized)
-    r_channel = rezized[:,:,2]
-    binary = np.zeros_like(r_channel)
-    binary[(r_channel > 200)] = 1
-    #cv2.imshow('22', binary)
-    hls = cv2.cvtColor(rezized, cv2.COLOR_BGR2HLS)
-    s_channel = rezized[:, :, 2]
-    binary2 = np.zeros_like(s_channel)
-    binary2[(r_channel > 160)] = 1
+cap.release()
+cv2.destroyAllWindows()
+window.mainloop()
 
-    allBinary = np.zeros_like(binary)
-    allBinary[((binary==1)|(binary2==1))]=255
-    cv2.imshow('221', allBinary)
-
-    allBinary_visial1 = allBinary.copy()
-    cv2.polylines(allBinary_visial1, [src_draw], True, 255)
-    cv2.imshow('ll', allBinary_visial1)
-
-    M = cv2.getPerspectiveTransform(src, dct)
-    warp = cv2.warpPerspective(allBinary, M, (img_size[1], img_size[0]), flags = cv2.INTER_LINEAR)
-    cv2.imshow('1', warp)
-
-    histogram = np.sum(warp[warp.shape[0]//2:,:], axis=0)
-
-    midpint = histogram.shape[0] // 2
-    ind_whitestcolumpL = np.argmax(histogram[:midpint])
-    ind_whitestcolumpR = np.argmax(histogram[midpint:]) + midpint
-
-    warp_visual = warp.copy()
-    cv2.line(warp_visual, (ind_whitestcolumpL, 0), (ind_whitestcolumpL, warp_visual.shape[0]),110, 2)
-    cv2.line(warp_visual, (ind_whitestcolumpR, 0), (ind_whitestcolumpR, warp_visual.shape[0]),110, 2)
-
-    cv2.imshow('123456', warp_visual)
-
-    nwindow = 9
-   # window_height = np.int(warp.shape[0] / nwindow)
-    window_wight = 25
-    XcenterLeftwindow  = ind_whitestcolumpL
-    XcenterRigthwindow  = ind_whitestcolumpR
-
-    left_line_index = np.array([], dtype=np.int16)
-    rigth_line_index = np.array([], dtype=np.int16)
-
-    out_img = np.dstack((warp, warp, warp))
-
-    nonzer = warp.nonzero()
-    White_pixeY = np.array(nonzer[0])
-    White_pixelX = np.array(nonzer[1])
-
-
-    for window in range(nwindow):
-        wind_y1 = warp.shape[0]  -(window +      1) * window_wight
-        wind_y2 =warp.shape[0]  -(window) * window_wight
-
-        left_win_x1 = XcenterLeftwindow - window_wight
-        left_win_x2 = XcenterLeftwindow + window_wight
-
-        rigth_win_x1 = XcenterRigthwindow - window_wight
-        rigth_win_x2 = XcenterRigthwindow + window_wight
-
-
-
-        cv2.rectangle(out_img, (left_win_x1, wind_y1), (left_win_x2, wind_y2), (50 + window*21, 0, 0), 2)
-        cv2.rectangle(out_img, (rigth_win_x1, wind_y1), (rigth_win_x2, wind_y2), (0, 0,50 + window*21), 2)
-        cv2.imshow('99', out_img)
-
-        good_left_index = ((White_pixeY>= wind_y1) & (White_pixeY <= wind_y2) & (White_pixelX >= left_win_x1) & (White_pixelX<= left_win_x2)).nonzero()[0]
-        good_rigth_index = ((White_pixeY>= wind_y1) & (White_pixeY <= wind_y2) & (White_pixelX >= rigth_win_x1) & (White_pixelX<= rigth_win_x2)).nonzero()[0]
-
-        left_line_index =  np.concatenate((left_line_index, good_left_index))
-        rigth_line_index =  np.concatenate((rigth_line_index, good_rigth_index))
-
-
-        if len(good_left_index) > 50:
-            XcenterLeftwindow = int(np.mean(White_pixelX[good_left_index]))
-        if len(good_rigth_index) > 50:
-            XcenterRigthwindow = int(np.mean(White_pixelX[good_rigth_index ]))
-
-
-
-
-    out_img[White_pixeY[left_line_index], White_pixelX[left_line_index]] = [255, 0, 0]
-    out_img[White_pixeY[rigth_line_index], White_pixelX[rigth_line_index]] = [0, 0, 255]
-    cv2.imshow('window', out_img)
-
-    lefx =    White_pixelX[left_line_index]
-    #print(lefx)
-    lefty =   White_pixeY[left_line_index]
-    #print(lefty)
-    rigthx =  White_pixelX[rigth_line_index]
-   # print(rigthx)
-    rigthty = White_pixeY[rigth_line_index]
-  #  print(rigthty)
-
-
-
-
-
-
-    cv2.line(out_img, (180, 0), (180, warp_visual.shape[0]), (255, 255, 0), 3)
-
-    cv2.imshow('end', out_img)
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        time.sleep(20)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-'''
-
-import RPi.GPIO as gpio
-import time
-gpio.setmode(gpio.BOARD)
-
-gpio.setup(7, gpio.OUT)
-gpio.setup(11, gpio.OUT)
-gpio.setup(13, gpio.OUT)
-gpio.setup(15, gpio.OUT)
-gpio.setup(16, gpio.OUT)
-gpio.setup(18, gpio.OUT)
-pwm = gpio.PWM(16, 100)
-pwm2 = gpio.PWM(18, 100)
-pwm.start(0)
-pwm2.start(0)
-gpio.output(7, True)
-gpio.output(11, False)
-gpio.output(13, True)
-gpio.output(15, False)
-for i in range(1, 100):
-        pwm.ChangeDutyCycle(i)
-        pwm2.ChangeDutyCycle(i)
-        time.sleep(0.1)
-pwm.stop()
-pwm2.stop()
-'''
