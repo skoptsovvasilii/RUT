@@ -8,7 +8,7 @@ from tkinter.ttk import *
 import time
 import math
 ## rjjvtyn
-
+#askjdkad klajkljdlkawl k
 class Tracker:
     def __init__(self):
         # Store the center positions of the objects
